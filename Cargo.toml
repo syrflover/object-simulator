@@ -1,0 +1,10 @@
+[package]
+name = "object-simulator"
+version = "0.1.0"
+authors = ["Lee Tae Woo <syr@meu.works>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rand = "0.7.3"
