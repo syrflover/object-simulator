@@ -45,7 +45,7 @@ async fn main() {
         // .filter(|(_, object)| object.alive)
         // .count();
 
-        for id in 1..object_len + 1 {
+        'object_iteration: for id in 1..object_len + 1 {
             let object_store = Arc::clone(&object_store);
             let object_event = Arc::clone(&object_event);
             let object_event_table = Arc::clone(&object_event_table);
@@ -55,14 +55,20 @@ async fn main() {
                 let mut rng = rand::thread_rng();
 
                 let id: u64 = id.try_into().unwrap();
-                // let object_store = object_store.lock().unwrap();
 
-                for event in object_event_table.iter() {
+                'event_iteration: for event in object_event_table.iter() {
                     let rand_num: f64 = rng.gen();
 
                     if rand_num <= event.percentage().unwrap() {
                         // 생존 여부 확인 후
                         // 죽었으면 continue
+
+                        if let Some(object) = object_store.lock().unwrap().get(&id) {
+                            println!("obje = {:?}", &object);
+                            if object.alive == false {
+                                break 'event_iteration;
+                            }
+                        }
 
                         match event {
                             events::object::ObjectEvent::Birth(_) => {
