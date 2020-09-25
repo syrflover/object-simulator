@@ -1,5 +1,9 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::sync::{Arc, Mutex};
+
+pub type ObjectStore = HashMap<u64, Arc<Object>>;
 
 #[derive(fmt::Debug)]
 pub enum ObjectKey {
@@ -41,7 +45,6 @@ impl Hash for ObjectKey {
 pub struct Object {
     pub id: u64,
     pub alive: bool,
-    pub lifetime: u64,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -51,7 +54,6 @@ impl fmt::Debug for Object {
         f.debug_struct("Object")
             .field("id", &self.id)
             .field("alive", &self.alive)
-            .field("lifetime", &self.lifetime)
             .field("created_at", &self.created_at)
             .field("updated_at", &self.updated_at)
             .finish()
@@ -73,11 +75,10 @@ impl Hash for Object {
 }
 
 impl Object {
-    pub fn new(id: u64, lifetime: u64, now_date: u64) -> Object {
+    pub fn new(id: u64, now_date: u64) -> Object {
         Object {
             id,
             alive: true,
-            lifetime: lifetime + now_date,
             created_at: now_date,
             updated_at: now_date,
         }
@@ -87,7 +88,6 @@ impl Object {
         Object {
             id,
             alive: true,
-            lifetime: 0,
             created_at: 0,
             updated_at: 0,
         }
@@ -97,7 +97,6 @@ impl Object {
         Object {
             id: self.id,
             alive: false,
-            lifetime: self.lifetime,
             created_at: self.created_at,
             updated_at: self.updated_at,
         }

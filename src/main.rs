@@ -4,8 +4,10 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::convert::TryInto;
 use std::iter::FromIterator;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::{thread, time};
+
+use tokio::prelude::*;
 
 use rand::prelude::*;
 
@@ -13,100 +15,101 @@ use crate::object_simulator::events;
 use crate::object_simulator::models;
 use crate::object_simulator::utils::{Date, YEAR};
 
-fn main() -> Result<(), std::num::TryFromIntError> {
+#[tokio::main]
+async fn main() {
     //
     //  Initialize Global
     //
-    let mut alive_object_store = HashMap::new();
-    let mut lifetime_object_store = HashMap::new();
-    let mut removed_object_store = HashMap::new();
-    let mut object_event_store = HashSet::new();
-    let mut global_event_store = HashSet::new();
-
-    let mut global = models::global::Global::new(
-        (
-            &mut alive_object_store,
-            &mut lifetime_object_store,
-            &mut removed_object_store,
-        ),
-        (&mut global_event_store, &mut object_event_store),
-    );
+    let mut global = models::global::Global::new(Arc::new(Date::new(1)));
+    let object_store: Arc<Mutex<models::object::ObjectStore>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    // let mut global_event_store = HashSet::new();
 
     //
     // Event
+
     //
-    let object_event_table = events::object::ObjectEvent::new();
-    let object_event_percentage_table = events::object::ObjectEvent::generate_percentage_table();
+    let object_event = Arc::new(events::object::ObjectEvent::new());
+    let object_event_table = Arc::new(events::object::ObjectEvent::generate_percentage_table());
 
     //
     // Initialize Object
     //
-    object_event_table.birth(&mut global, 1, YEAR * 30);
+    object_event.birth(Arc::clone(&object_store), Arc::clone(&global.date), 1);
 
     //
-    let mut rng = rand::thread_rng();
 
     loop {
-        let days_count = global.date.to_day();
+        let object_len = object_store.lock().unwrap().len();
+        // .iter()
+        // .filter(|(_, object)| object.alive)
+        // .count();
 
-        global.date = Date::new(days_count + 1);
+        for id in 1..object_len + 1 {
+            let object_store = Arc::clone(&object_store);
+            let object_event = Arc::clone(&object_event);
+            let object_event_table = Arc::clone(&object_event_table);
+            let date = Arc::clone(&global.date);
 
-        let alive_object_count = global.object.alive.len();
-        let removed_object_count = global.object.removed.len();
-        let all_object_count = alive_object_count + removed_object_count;
+            tokio::spawn(async move {
+                let mut rng = rand::thread_rng();
 
-        let object_lifetime = models::object::ObjectKey::Lifetime(days_count);
+                let id: u64 = id.try_into().unwrap();
+                // let object_store = object_store.lock().unwrap();
 
-        if global.date.month == 1 && global.date.day == 1 {
-            let duration = time::Duration::from_millis(100);
-            thread::sleep(duration);
+                for event in object_event_table.iter() {
+                    let rand_num: f64 = rng.gen();
 
-            println!("Date            = {}", global.date);
-            println!("All Objects     = {}", alive_object_count);
-            println!("Alive Objects   = {}", alive_object_count);
-            println!("Removed Objects = {}", removed_object_count);
-            println!("-------------------------------");
-            println!("Days {}", days_count);
-            println!("Lifetime len {}", global.object.lifetime.len());
-            println!("Lifetimes {:?}", &object_lifetime);
+                    if rand_num <= event.percentage().unwrap() {
+                        // 생존 여부 확인 후
+                        // 죽었으면 continue
 
-            if alive_object_count == 0 {
-                panic!("The End");
-            }
-        }
+                        match event {
+                            events::object::ObjectEvent::Birth(_) => {
+                                let new_object_id: u64 =
+                                    (object_store.lock().unwrap().len() + 1).try_into().unwrap();
 
-        object_event_table.death_from_lifetime(&mut global, &object_lifetime);
+                                object_event.birth(
+                                    Arc::clone(&object_store),
+                                    Arc::clone(&date),
+                                    new_object_id,
+                                );
+                            }
 
-        'object_iteration: for object_id in 1..(all_object_count) + 1 {
-            let object_id: u64 = object_id.try_into().unwrap();
+                            events::object::ObjectEvent::Death(_) => {
+                                object_event.death(Arc::clone(&object_store), id);
+                            }
 
-            if !global
-                .object
-                .alive
-                .contains_key(&models::object::ObjectKey::Id(object_id))
-            {
-                continue 'object_iteration;
-            }
-
-            let rand_num: f64 = rng.gen();
-
-            for event_percentage in &object_event_percentage_table {
-                let percentage = event_percentage.percentage();
-
-                if rand_num <= percentage {
-                    match event_percentage {
-                        events::object::ObjectEventPercentage::Birth(_) => {
-                            let new_object_id: u64 = (all_object_count + 1).try_into().unwrap();
-
-                            object_event_table.birth(&mut global, new_object_id, YEAR * 30);
+                            _ => {}
                         }
-
-                        _ => {} /* events::object::ObjectEventPercentage::Death(_) => {
-                                    // object_event_table.death(&mut global, object_id);
-                                } */
                     }
                 }
-            }
+            });
         }
+
+        let object_store = object_store.lock().unwrap();
+
+        let object_len = object_store.len();
+        let alive_len = object_store
+            .iter()
+            .filter(|(_, object)| object.alive)
+            .count();
+        let removed_len = object_len - alive_len;
+
+        if alive_len == 0 {
+            panic!("The End");
+        }
+
+        println!("date = {}", &global.date);
+        println!("all = {}", object_len);
+        println!("alive = {}", alive_len);
+        println!("removed = {}", removed_len);
+
+        global.date = Arc::new(Date::new(global.date.to_day() + 1));
+
+        let duration = time::Duration::from_millis(105);
+        thread::sleep(duration);
     }
 }
+
+async fn process_object_event(object_event: events::object::ObjectEvent) {}
